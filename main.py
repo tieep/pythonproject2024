@@ -24,14 +24,14 @@ import sys
 #                         `=--=-'                              
 
 
-class Game:    
+class Game: 
     def __init__(self):
         pygame.init()
         self.screen = pygame.display.set_mode((WIN_WIDTH, WIN_HEIGHT))
         self.clock = pygame.time.Clock()
         self.font = pygame.font.Font('Arial.ttf', 32)
         self.running = True
-        self.boss_defeated = False
+        self.boss_appeared = False
         self.character_spritesheet = Spritesheet('img/character.png')
         self.terrain_spritesheet = Spritesheet('img/terrain.png')
         self.enemy_spritesheet = Spritesheet('img/enemy.png')
@@ -42,30 +42,31 @@ class Game:
         self.ak47_spritesheet = Spritesheet('img/AK47-SpriteSheet.png')
         self.sniper_spritesheet = Spritesheet('img/SniperRifle-SpriteSheet.png')
         self.boss_spritesheet = Spritesheet('img/boss1.jpg')
+
         self.t1 = pygame.time.get_ticks()
         self.player: Player = None
- 
+
     def create_tilemap(self):
         self.maps = MapList(tilemaps, self)
         self.maps.draw()
-        
+
     # new game start
     def new(self):
         self.playing = True
         self.all_sprites = pygame.sprite.LayeredUpdates()
         self.blocks = pygame.sprite.LayeredUpdates()
         self.enemies = pygame.sprite.LayeredUpdates()
-        self.boss=pygame.sprite.LayeredUpdates()
         self.attacks = pygame.sprite.LayeredUpdates()
         self.bullets = pygame.sprite.LayeredUpdates()
         self.guns = pygame.sprite.LayeredUpdates()
         self.entrances = pygame.sprite.LayeredUpdates()
         self.enemies_bullets = pygame.sprite.LayeredUpdates()
+        self.player_hit_entrances = False        #change
         #player health and armor bar
         self.bars = pygame.sprite.LayeredUpdates()
         self.create_tilemap()
         PlayerBars(self)
-
+        
     def events(self):
         #game loop events
         for event in pygame.event.get():
@@ -102,7 +103,18 @@ class Game:
         #game loop draw
         self.screen.fill(BLACK)
         self.all_sprites.draw(self.screen)
-        #draw health and armor bar
+        #start change
+        if self.player.check_collide(): 
+            self.player_hit_entrances = True
+
+        if self.player_hit_entrances:
+            for enemy in self.enemies:
+                if isinstance(enemy, Boss):
+                    print('Boss')
+                    enemy.draw_health_bar()
+                    if enemy.HP <= 0: 
+                        self.player_hit_boss = False
+        #end change
         self.bars.draw(self.screen)
         self.clock.tick(FPS)
         pygame.display.update()
