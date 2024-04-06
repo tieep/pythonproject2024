@@ -2,6 +2,8 @@ import pygame
 from config import *
 import math
 import random
+#matplotlib
+
 class Spritesheet:
     def __init__(self, filename):
         self.sheet = pygame.image.load(filename).convert()
@@ -50,8 +52,8 @@ class Player(pygame.sprite.Sprite):
         self.score = 0
 
         self.max_hp = 5
-        self.max_armour = 3
-        self.max_mana = 128
+        self.max_armour = 4
+        self.max_mana = 200
 
         self.HP = self.max_hp
         self.armour = self.max_armour
@@ -99,7 +101,7 @@ class Player(pygame.sprite.Sprite):
         self.y_change = 0
 
         #TODO: sau 4s khong chien dau se hoi 1 giap / s
-        if self.armour < self.max_armour and pygame.time.get_ticks() - self.timer_attack > 4000:
+        if self.armour < self.max_armour and pygame.time.get_ticks() - self.timer_attack > 3000:
             if pygame.time.get_ticks() - self.timer_armour > 1000:
                 self.armour += 1
                 self.timer_armour = pygame.time.get_ticks()
@@ -140,7 +142,7 @@ class Player(pygame.sprite.Sprite):
     def collide_enemy(self):
         hits = pygame.sprite.spritecollide(self, self.game.enemies, False)
         if hits:
-            self.get_dmg(self.game.enemies.sprites()[0].dmg)
+            self.get_dmg(1)
 
     def get_dmg(self, dmg):
         if pygame.time.get_ticks() - self.timer_hit > 800:
@@ -156,7 +158,7 @@ class Player(pygame.sprite.Sprite):
     def collide_bullet(self):
         hits = pygame.sprite.spritecollide(self, self.game.enemies_bullets, False)
         if hits:
-            self.get_dmg(1)
+            self.get_dmg(0)
             hits[0].kill()
 
     def collide_blocks(self, dir):
@@ -172,7 +174,14 @@ class Player(pygame.sprite.Sprite):
                     self.rect.bottom = hits[0].rect.top
                 if self.y_change < 0:
                     self.rect.top = hits[0].rect.bottom
-
+    # start change
+    def check_collide(self):
+        for entrance in self.game.entrances:
+            if entrance.is_boss_entrance and pygame.sprite.collide_rect(self, entrance):  # Only check collision with boss entrances
+                print("Collide")
+                return True
+        return False
+    #end change
     def animate(self):
         if self.facing == "left":
             if self.x_change == 0 and self.y_change == 0:
@@ -205,8 +214,9 @@ class Player(pygame.sprite.Sprite):
         return nearest_enemy
 
 class Enemy(pygame.sprite.Sprite):
-    def __init__(self, game, x, y, mapx, mapy, map):
+    def __init__(self, game, x, y, mapx, mapy, map, weapon_ratio_dict = ENEMY_WEAPON_RATIO):
         self.game = game
+   
         self._layer = ENERMY_LAYER
         self.groups = self.game.all_sprites, self.game.enemies
         pygame.sprite.Sprite.__init__(self, self.groups)
@@ -223,7 +233,11 @@ class Enemy(pygame.sprite.Sprite):
         self.animation_loop = 1
         self.movement_loop = 0
         self.max_travel = random.randint(30, 60)
-
+        #start change
+        self.health_bar_color = RED
+        self.health_bar_width = self.width
+        self.health_bar_height = 8
+        #end change
         self.image = self.game.enemy_spritesheet.get_sprite(3, 2, self.width, self.height)
         self.image.set_colorkey(BLACK)
 
@@ -243,9 +257,14 @@ class Enemy(pygame.sprite.Sprite):
         self.room = map
         self.rad = 0
 
-        self.weapon = Glock(self.game, self)
-        self.weapon.delay *= 3
-
+        rand_weapon = random.choices(list(weapon_ratio_dict.keys()), weights=weapon_ratio_dict.values(), k=1)[0]
+        if rand_weapon == "glock":
+            self.weapon = Glock(self.game, self, PLAYER_GLOCK_DELAY)
+        elif rand_weapon == "ak47":
+            self.weapon = AK47(self.game, self, PLAYER_AK47_DELAY)
+        else:
+            self.weapon = Sniper(self.game, self, PLAYER_SNIPER_DELAY)
+        
         self.attacking = False
         self.rand = random.randint(1, 4)
 
@@ -260,7 +279,7 @@ class Enemy(pygame.sprite.Sprite):
 
         self.x_change = 0
         self.y_change = 0
-
+        
     def animate(self):
         if self.facing == "left":
             if self.x_change == 0 and self.y_change == 0:
@@ -292,7 +311,7 @@ class Enemy(pygame.sprite.Sprite):
                     self.rect.bottom = hits[0].rect.top
                 if self.y_change < 0:
                     self.rect.top = hits[0].rect.bottom
-
+    
     def collide_bullet(self):
         hits = pygame.sprite.spritecollide(self, self.game.bullets, False)
         if hits:
@@ -310,8 +329,8 @@ class Enemy(pygame.sprite.Sprite):
         if self.y_change != 0 or self.x_change != 0:
             self.rad = math.atan2(self.y_change, self.x_change)
         player = self.game.player
-        distance = math.sqrt((player.rect.x - self.rect.x)**2 + (player.rect.y - self.rect.y)**2)
-        if distance < ENEMY_SCOPE and self.room.open == False:
+        distance = math.sqrt((player.rect.centerx - self.rect.centerx)**2 + (player.rect.centery - self.rect.centery)**2)
+        if distance < self.weapon.scope + 96 and self.room.open == False:
             self.taunted_movement(distance)
         else:
             self.normal_movement()
@@ -337,39 +356,52 @@ class Enemy(pygame.sprite.Sprite):
             self.max_travel = random.randint(30, 60)
         pass
 
-    def taunted_movement(self, distance = ENEMY_SCOPE):
+    def taunted_movement(self, distance):
         player = self.game.player
-        dy = player.rect.y - self.rect.y
-        dx = player.rect.x - self.rect.x
+        dy = player.rect.centery - self.rect.centery
+        dx = player.rect.centerx - self.rect.centerx
         self.rad = math.atan2(dy, dx)
         if distance > self.weapon.scope:
             self.x_change += ENEMY_SPEED * math.cos(self.rad)
             self.y_change += ENEMY_SPEED * math.sin(self.rad)
         elif self.weapon.can_shoot():
             self.weapon.shoot()
+
+    #cu cach 1 khoang thoi gian, boss lai lam mot hanh dong ngau nhien
         
     def kill(self):
         self.weapon.kill()
         pygame.sprite.Sprite.kill(self)
+    #start change
+    def draw_health_bar(self): 
+            screen_width = self.game.screen.get_width()
+        
+            health_bar_width = self.width * (self.HP / 10)*5
+            health_bar_height = 20
+            health_bar_x = (screen_width - health_bar_width) / 2 + 90
+            health_bar_y = 10
+            
+            pygame.draw.rect(self.game.screen, self.health_bar_color, (health_bar_x, health_bar_y, health_bar_width, health_bar_height))
+    #end change
 class Boss(Enemy):
     def __init__(self, game, x, y, mapx, mapy, map):
         self.game = game
-        # self.groups = self.game.all_sprites, self.game.boss
-        # pygame.sprite.Sprite.__init__(self, self.groups)
-        super().__init__(game, x, y, mapx, mapy, map)
+        Enemy.__init__(self, self.game, x, y, mapx, mapy, map, {"ak47": 1})
         
-        self.x = mapx + x * BOSS_SIZE
-        self.y = mapy + y * BOSS_SIZE
+        
         self.width = BOSS_SIZE
         self.height = BOSS_SIZE
         self.image = self.game.boss_spritesheet.get_sprite(0, 2, self.width, self.height)
-        self.down_animations = [self.game.boss_spritesheet.get_sprite(3, 2, self.width, self.height),
-                            self.game.boss_spritesheet.get_sprite(35, 2, self.width, self.height),
-                            self.game.boss_spritesheet.get_sprite(67, 2, self.width, self.height)]
+        self.rect = self.image.get_rect()
+        self.rect.x = self.x
+        self.rect.y = self.y
+        # self.down_animations = [self.game.boss_spritesheet.get_sprite(3, 2, self.width, self.height),
+        #                     self.game.boss_spritesheet.get_sprite(35, 2, self.width, self.height),
+        #                     self.game.boss_spritesheet.get_sprite(67, 2, self.width, self.height)]
         
-        self.up_animations = [self.game.boss_spritesheet.get_sprite(3, 34, self.width, self.height),
-                            self.game.boss_spritesheet.get_sprite(35, 34, self.width, self.height),
-                            self.game.boss_spritesheet.get_sprite(67, 34, self.width, self.height)]
+        # self.up_animations = [self.game.boss_spritesheet.get_sprite(3, 34, self.width, self.height),
+        #                     self.game.boss_spritesheet.get_sprite(35, 34, self.width, self.height),
+                            # self.game.boss_spritesheet.get_sprite(67, 34, self.width, self.height)]
 
         self.right_animations = [self.game.boss_spritesheet.get_sprite(12,83, self.width, self.height),
                             self.game.boss_spritesheet.get_sprite(93,75, self.width, self.height),
@@ -378,43 +410,24 @@ class Boss(Enemy):
         self.left_animations = [self.game.boss_spritesheet.get_sprite(18, 160, self.width, self.height),
                             self.game.boss_spritesheet.get_sprite(113, 160, self.width, self.height),
                             self.game.boss_spritesheet.get_sprite(203, 160, self.width, self.height)]
-        self.HP = 10
-        self.weapon = random.choice([Glock(self.game, self), AK47(self.game, self), Sniper(self.game, self)])
-        self.dmg = 0
-  
+        self.HP = 10    
     def animate(self):
         if self.facing == "left":
             if self.x_change == 0 and self.y_change == 0:
-                self.image = self.game.boss_spritesheet.get_sprite(3, 66, self.width, self.height)
+                self.image = self.left_animations[0]
             else:
                 self.image = self.left_animations[math.floor(self.animation_loop)]
                 self.animation_loop += 0.1
         if self.facing == "right":
             if self.x_change == 0 and self.y_change == 0:
-                self.image = self.game.boss_spritesheet.get_sprite(12, 83, self.width, self.height)
+                self.image = self.right_animations[0]
             else:
                 self.image = self.right_animations[math.floor(self.animation_loop)]
                 self.animation_loop += 0.1
 
         if self.animation_loop >= 3:
             self.animation_loop = 1
-    def collide_blocks(self, dir):
-        hits = pygame.sprite.spritecollide(self, self.game.blocks, False)
-        hits += pygame.sprite.spritecollide(self, self.game.entrances, False)
-        if hits:
-            if (dir == "x"):
-                if self.x_change > 0:
-                    self.rect.right=hits[0].rect.left
-                    
-                if self.x_change < 0:
-                    self.rect.left = hits[0].rect.right
-            if (dir == "y"):
-                if self.y_change > 0:
-                    self.rect.bottom = hits[0].rect.top
-                 
-                if self.y_change < 0:
-                    self.rect.top = hits[0].rect.bottom
-              
+    
 class Block(pygame.sprite.Sprite):
     def __init__(self, game, x, y, mapx, mapy):
 
@@ -620,7 +633,7 @@ class Gun(pygame.sprite.Sprite):
 
     def can_shoot(self):
         now = pygame.time.get_ticks()
-        if now - self.timer > self.delay and (isinstance(self.owner, Enemy) or self.owner.mana >= self.manacost):
+        if now - self.timer > self.delay and (isinstance(self.owner, Enemy) or isinstance(self.owner, Enemy) or self.owner.mana >= self.manacost):
             self.timer = now
             return True
         return False
@@ -637,7 +650,7 @@ class Gun(pygame.sprite.Sprite):
         return headx, heady
 
 class Glock(Gun):
-    def __init__(self, game, owner, delay = GLOCK_DELAY):
+    def __init__(self, game, owner, delay = PLAYER_GLOCK_DELAY, bullet_dmg = PLAYER_GLOCK_DMG):
         self._layer = GUN_LAYER
         self.game = game
         self.owner = owner
@@ -663,7 +676,7 @@ class Glock(Gun):
         self.rad = self.owner.rad
         self.scope = GLOCK_SCOPE
         self.delay = delay
-        self.bullet_dmg = 1
+        self.bullet_dmg = bullet_dmg
         self.rad_offset = 3
 
         #pos against player to place gun when facing right
@@ -671,10 +684,11 @@ class Glock(Gun):
         self.headpos = (40, 8)
         self.manacost = 0
         self.speed = GLOCK_BULLET_SPEED
-        
+        if isinstance(self.owner, Enemy) and isinstance(self.owner, Boss) == False:
+            self.delay *= 4
 
 class AK47(Gun):
-    def __init__(self, game, owner, delay = AK47_DELAY):
+    def __init__(self, game, owner, delay = PLAYER_AK47_DELAY, bullet_dmg = PLAYER_AK47_DMG):
         self._layer = GUN_LAYER
         self.game = game
         self.owner = owner
@@ -700,16 +714,18 @@ class AK47(Gun):
         self.rad = self.owner.rad
         self.scope = AK47_SCOPE
         self.delay = delay
-        self.bullet_dmg = 1
+        self.bullet_dmg = bullet_dmg
         self.rad_offset = 4
         #pos against player to place gun when facing right
         self.place_right = (6, 4)
         self.headpos = (48, 4)
         self.manacost = 2
         self.speed = AK47_BULLET_SPEED
+        if isinstance(self.owner, Enemy) and isinstance(self.owner, Boss) == False:
+            self.delay *= 4
 
 class Sniper(Gun):
-    def __init__(self, game, owner,delay = SNIPER_DELAY):
+    def __init__(self, game, owner,delay = PLAYER_SNIPER_DELAY, bullet_dmg = PLAYER_SNIPER_DMG):
         self._layer = GUN_LAYER
         self.game = game
         self.owner = owner
@@ -736,18 +752,21 @@ class Sniper(Gun):
         self.rad = self.owner.rad
         self.scope = SNIPER_SCOPE
         self.delay = delay
-        self.bullet_dmg = 3
+        self.bullet_dmg = bullet_dmg
         self.rad_offset = 0
         #pos against player to place gun when facing right
         self.place_right = (8, 4)
         self.headpos = (48, 6)
         self.manacost = 5
         self.speed = SNIPER_BULLET_SPEED
+        if isinstance(self.owner, Enemy) and isinstance(self.owner, Boss) == False:
+            self.delay *= 4
 
 class Entrance(pygame.sprite.Sprite):
     def __init__(self, game, x, y, mapx, mapy):
         self.enable = True
         self.game = game
+        self.is_boss_entrance = False  #change
         self._layer = BLOCK_LAYER
         self.groups = self.game.all_sprites, self.game.entrances, self.game.blocks
         pygame.sprite.Sprite.__init__(self, self.groups)
@@ -762,8 +781,13 @@ class Entrance(pygame.sprite.Sprite):
         self.rect = self.image.get_rect()
         self.rect.x = self.x
         self.rect.y = self.y
-
+    #start change
+    def set_boss_entrance(self):
+        self.is_boss_entrance = True
+        print("boss entrance")
+    #end change
     def update(self):
+       
         if(self.enable): 
             self.image = self.game.terrain_spritesheet.get_sprite(704, 160, self.width, self.height)
             self.game.blocks.add(self)
@@ -805,10 +829,8 @@ class MyMap(pygame.sprite.Sprite):
         self._layer = MAP_LAYER
         self.mappingpos = [0, 0]
         self.tilemap = tilemap
-        self.bossmap=bossmap
         self.isDrawn = False
         self.game = game
-    
         #start position of the map including the border
         self.x = 0
         self.y = 0
@@ -820,22 +842,24 @@ class MyMap(pygame.sprite.Sprite):
         self.bottom = None
         self.left = None
         self.right = None
+
+        self.num_enemies = 0
         self.groups = self.game.all_sprites
         pygame.sprite.Sprite.__init__(self, self.groups)
         self.entrances = pygame.sprite.Group()
         self.enemies = pygame.sprite.Group()
-        self.boss=pygame.sprite.Group()
-        self.boss_entrances = pygame.sprite.Group()
+       
         self.open = True
         self.max_phase = phase_num
-        self.current_phase = 1
+        self.current_phase = 0
         self.available_pos = []
         self.clear = False
+        self.current_phase = 1
 
     def draw(self):
         self.create_tilemap()
+        
         self.isDrawn = True
-
     def checkEntrance(self, i, j):
         if(self.top != None):
             if i == 0 and j > 6 and j < 13:
@@ -853,54 +877,25 @@ class MyMap(pygame.sprite.Sprite):
 
     def update(self):
         self.update_phase()
-        num_enemies = len(self.game.enemies.sprites())
-        print(num_enemies)
-        num_boss = len(self.boss.sprites())
-        print("num_boss", num_boss)
-        if num_enemies != 0:
-        
-                    for entrance in self.entrances:
-                        if entrance not in self.boss_entrances:  
-                            entrance.enable = False
-                    self.open = True
-                    for boss_entrance in self.boss_entrances:
-                        boss_entrance.enable = True
-                        
-                    self.open = False
-        if num_enemies ==0:
-            for entrance in self.entrances:
-                entrance.enable = True
-            self.open = False
-            for boss_entrance in self.boss_entrances:
-                boss_entrance.enable = False
-            self.open = True
-        if(num_enemies == 0 and num_boss==0 and self.current_phase >= self.max_phase):
-                
-                self.clear = True     
         if self.rect.contains(self.game.player.rect) and self.enemies:
             for entrance in self.entrances:
                 entrance.enable = True
             self.open = False
         else:
             for entrance in self.entrances:
-                if entrance not in self.boss_entrances:
-                    entrance.enable = False
-                self.open = True
-        
-       
-            
+                entrance.enable = False
+            self.open = True
+
     def update_phase(self):
+        #get num enemy in self.enemies
         num_enemies = len(self.enemies.sprites())
-        
-       
-            # if self.rect.contains(self.game.player.rect) and self.boss:
-            #     for boss_entrance in self.boss_entrances:
-            #         boss_entrance.enable = True
-            #     self.open = False
+
+        if(num_enemies == 0 and self.current_phase >= self.max_phase):
+            self.clear = True
         if( num_enemies == 0 and self.current_phase < self.max_phase):
             self.current_phase += 1
             #chon 5 vi tri random de tao enemy
-            enemies_pos = random.sample(self.available_pos, 1)
+            enemies_pos = random.sample(self.available_pos, random.randint(2, 8))
             for pos in enemies_pos:
                 enemy = Enemy(self.game, pos[0], pos[1], self.rect.x-32, self.rect.y-32, self)
                 self.enemies.add(enemy)
@@ -912,42 +907,37 @@ class MyMap(pygame.sprite.Sprite):
         self.rect.topleft = ( 32 + self.mappingpos[0] * WIN_WIDTH, 32 + self.mappingpos[1] * WIN_HEIGHT)
         
     def create_tilemap(self):
-        boss_position = None
+        
         for i, row in enumerate(self.tilemap):
             for j, col in enumerate(row):
                 if col == 'B':
                     if(self.checkEntrance(i, j)):
                         sprite = Entrance(self.game, j, i, self.x, self.y)
                         self.entrances.add(sprite)
-                      
+                        #start change
+                        if self.check_boss_entrance(i, j):
+                            sprite.set_boss_entrance()
+                        #end change
                     else: Block(self.game, j, i, self.x, self.y)
+                    
                 if col == 'E':
                     enemy = Enemy(self.game, j, i, self.x, self.y, self)
                     self.enemies.add(enemy)
                 if col == 'P':
                     self.game.player = Player(self.game, j, i, self.x, self.y)
                     self.game.player.set_weapons()
-                if col == "M":
-                    boss= Boss(self.game, j, i, self.x, self.y, self)
-                    self.boss.add(boss)    
-                    
-                    boss_position = (i, j)
-                if boss_position:
-                    boss_entrance_positions = [
-                        (boss_position[0] - 2, boss_position[1]-9),
-                        (boss_position[0] - 1, boss_position[1]-9),
-                        (boss_position[0], boss_position[1] - 9),
-                        (boss_position[0]+1, boss_position[1] -9),
-                        (boss_position[0]+2,boss_position[1]-9)
-        ]           
-                    for pos in boss_entrance_positions:
-                        sprite = Entrance(self.game, pos[1], pos[0], self.x, self.y)
-                        self.boss_entrances.add(sprite)       
-                if col == 'E' or col == 'P' or col == '.' :
+                if col == 'E' or col == 'P' or col == '.':
                     self.available_pos.append([j, i])
+                if col == '5':
+                    boss = Boss(self.game, j, i, self.x, self.y, self)
+                    self.enemies.add(boss)
+       
                 if(col == ' '): continue
                 Ground(self.game, j, i, self.x, self.y)
-        
+    #start change
+    def check_boss_entrance(self, i, j):  # giá trị của i,j thay đổi tùy thuộc việc map chứa boss ở đâu
+        return (i == 5 and j == 0) or (i==6 and j==0)  or (i==7 and j==0) or (i==8 and j==0) or (i==9 and j==0)
+    #end change
 class MapList:
     def __init__(self, tilemaps, game):
         self.maps = []
@@ -955,22 +945,18 @@ class MapList:
         self.game = game
         for tilemap in tilemaps:
             self.maps.append(MyMap(tilemap, game, 2))
-            
-        #print(len(self.maps)) #check 
-        
-        self.maps.append(MyMap(bossmap, game, 1))
-        #print(len(self.maps)) # check thành công ra len 6, chèn thêm map cho boss success
 
-        self.maps[0].max_phase  = 0
+        self.maps[0].max_phase = 0
+        self.maps[1].max_phase = 0
         self.link(self.maps[0], self.maps[1], "right")
         self.link(self.maps[1], self.maps[2], "top")
         self.link(self.maps[1], self.maps[3], "bottom")
         self.link(self.maps[1], self.maps[4], "right")
         self.link(self.maps[4], self.maps[5], "right")
-        
+
     def draw(self):
         self.DFS_draw(self.maps[0])
-
+        
     def DFS_draw(self, map):
         map.draw()
         for adj in [map.top, map.bottom, map.left, map.right]:
@@ -980,7 +966,7 @@ class MapList:
     def link(self, m1, m2, dir):
         pipe = MyMap(hpipemap, self.game)
         self.pipes.append(pipe)
-        
+
         if(dir == "right"):
             pipe.tilemap = hpipemap
             m1.right = pipe
@@ -1019,8 +1005,8 @@ class MapList:
             if map.clear == False:
                 return False
         return True
-    
 
+#can toi uu do chay qua cham
 class PlayerBars(pygame.sprite.Sprite):
     def __init__(self, game):
         self._layer = UI_LAYER
@@ -1116,4 +1102,3 @@ class PlayerBars(pygame.sprite.Sprite):
         self.mana_bg.blit(self.mana_bar, self.mana_bar_rect)
         self.image.blit(self.mana_bg, self.mana_bg_rect)
         self.image.blit(info, info_rect)
-
